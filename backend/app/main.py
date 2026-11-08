@@ -4,6 +4,7 @@ import logging
 from multiprocessing import connection
 
 from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -17,6 +18,14 @@ app = FastAPI(
     version="0.4.0",
     description="API thuc hanh Buoi 4 - transaction, locking va hieu nang",
 )
+# Buoi 5: chi cho phep frontend local goi API qua trinh duyet.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
+)   
 
 @app.get("/")
 def read_root() -> dict[str, str]:
