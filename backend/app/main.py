@@ -435,3 +435,168 @@ def update_section_capacity(section_id: str, payload: SectionCapacityUpdate) -> 
 #Phần code đã viết ở bên trên 
 
 #Bài 5. Hoàn thiện Collection Postman
+
+
+# ==========================================
+# BUỔI 4 - ASSIGNMENT
+# ==========================================
+
+# Bài 1. API đọc lịch sử đăng ký
+@app.get("/enrollment-events")
+def list_enrollment_events(
+    student_id: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> list[dict[str, object]]:
+    sql = """
+        SELECT *
+        FROM enrollment_events
+    """
+    conditions: list[str] = []
+    parameters: dict[str, object] = {
+        "skip": skip,
+        "limit": limit,
+    }
+
+    if student_id is not None:
+        student_id_val = student_id.strip()
+        if student_id_val:
+            conditions.append("student_id = :student_id")
+            parameters["student_id"] = student_id_val
+
+    if event_type is not None:
+        event_type_val = event_type.strip().upper()
+        if event_type_val:
+            conditions.append("event_type = :event_type")
+            parameters["event_type"] = event_type_val
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+
+    sql += " ORDER BY occurred_at DESC, id DESC LIMIT :limit OFFSET :skip"
+
+    with engine.connect() as connection:
+        rows = connection.execute(text(sql), parameters).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+# Bài 2. Kiểm thử rollback nhiều bảng (Endpoint demo thử nghiệm)
+@app.post(
+    "/demo/rollback-test",
+    status_code=status.HTTP_201_CREATED,
+    tags=["demo"],
+)
+def demo_rollback_test(
+    payload: EnrollmentCreate,
+    fail_event_type: bool = Query(
+        default=True,
+        description="Nếu True, cố ý gán event_type không hợp lệ ('INVALID_EVENT') để gây lỗi CHECK constraint và kích hoạt rollback",
+    ),
+) -> dict[str, str]:
+    student_sql = "SELECT id FROM students WHERE id = :student_id"
+    lock_section_sql = """
+        SELECT id, capacity
+        FROM class_sections
+        WHERE id = :class_section_id
+        FOR UPDATE
+    """
+    duplicate_sql = """
+        SELECT 1
+        FROM enrollments
+        WHERE student_id = :student_id
+            AND class_section_id = :class_section_id
+    """
+    count_sql = """
+        SELECT COUNT(*)
+        FROM enrollments
+        WHERE class_section_id = :class_section_id
+    """
+    insert_sql = """
+        INSERT INTO enrollments (student_id, class_section_id)
+        VALUES (:student_id, :class_section_id)
+    """
+    event_sql = """
+        INSERT INTO enrollment_events
+            (student_id, class_section_id, event_type, source, dataset)
+        VALUES
+            (:student_id, :class_section_id, :event_type, 'demo_api', 'demo')
+    """
+    parameters = {
+        "student_id": payload.student_id,
+        "class_section_id": payload.class_section_id,
+        "event_type": "INVALID_EVENT" if fail_event_type else "CREATED",
+    }
+
+    try:
+        with engine.begin() as connection:
+            student = connection.execute(
+                text(student_sql),
+                {"student_id": payload.student_id},
+            ).first()
+            if student is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay sinh vien",
+                )
+
+            section = connection.execute(
+                text(lock_section_sql),
+                {"class_section_id": payload.class_section_id},
+            ).mappings().first()
+            if section is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Khong tim thay lop hoc phan",
+                )
+
+            duplicated = connection.execute(
+                text(duplicate_sql),
+                {
+                    "student_id": payload.student_id,
+                    "class_section_id": payload.class_section_id,
+                },
+            ).first()
+            if duplicated is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Sinh vien da dang ky lop nay",
+                )
+
+            enrolled = connection.execute(
+                text(count_sql),
+                {"class_section_id": payload.class_section_id},
+            ).scalar_one()
+            if int(enrolled) >= int(section["capacity"]):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Lop hoc phan da het cho",
+                )
+
+            # 1. Thao tác INSERT enrollments thành công trước
+            connection.execute(
+                text(insert_sql),
+                {
+                    "student_id": payload.student_id,
+                    "class_section_id": payload.class_section_id,
+                },
+            )
+
+            # 2. Thao tác INSERT enrollment_events cố ý thất bại nếu fail_event_type = True
+            # (Vi phạm ck_enrollment_events_type CHECK (event_type IN ('CREATED', 'CANCELLED')))
+            connection.execute(text(event_sql), parameters)
+
+    except IntegrityError as exc:
+        # Khi INSERT enrollment_events thất bại, khối engine.begin() tự động rollback toàn bộ transaction
+        # dẫn đến thao tác INSERT enrollments trước đó bị hủy bỏ, số lượng enrollments không thay đổi!
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Transaction rollback thành công: Lỗi ràng buộc khi ghi enrollment_events (enrollments không bị tăng).",
+        ) from exc
+
+    return {
+        "message": "Dang ky demo thanh cong",
+        "student_id": payload.student_id,
+        "class_section_id": payload.class_section_id,
+    }
