@@ -3,6 +3,9 @@ import { api } from "./api.js";
 import Notice from "./components/Notice.jsx";
 import SectionTable from "./components/SectionTable.jsx";
 import EnrollmentList from "./components/EnrollmentList.jsx";
+import StudentForm from "./components/StudentForm.jsx";
+import EnrollmentHistory from "./components/EnrollmentHistory.jsx";
+import ServerSectionSearch from "./components/ServerSectionSearch.jsx";
 
 export default function App() {
   const [draftId, setDraftId] = useState("22000004");
@@ -11,6 +14,7 @@ export default function App() {
   const [sections, setSections] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [search, setSearch] = useState("");
+  const [selectedCourse, setSelectedCourse] = useState("");
   const [onlyAvailable, setOnlyAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -100,6 +104,7 @@ export default function App() {
   })).filter((row) => (
     `${row.class_id} ${row.course_code} ${row.course_name}`.toLowerCase().includes(keyword)
     && (!onlyAvailable || row.remaining > 0)
+    && (!selectedCourse || row.course_code === selectedCourse)
   ));
   const disabled = loading || busy || Boolean(error);
 
@@ -114,20 +119,18 @@ export default function App() {
       <p className="demo-note">
         Môi trường thực hành. Nhập mã sinh viên để thử dữ liệu, không phải đăng nhập.
       </p>
-      <section className="panel">
-        <h2>1. Chọn sinh viên</h2>
-        <form className="student-form" onSubmit={chooseStudent}>
-          <label htmlFor="student-id">Mã sinh viên</label>
-          <input id="student-id" value={draftId} maxLength={8} required
-            inputMode="numeric" onChange={(e) => setDraftId(e.target.value)}
-            disabled={busy} />
-          <button type="submit" disabled={busy}>Xem đăng ký</button>
-          <button type="button" className="secondary" disabled={busy || loading}
-            onClick={() => setRefresh((value) => value + 1)}>Tải lại dữ liệu</button>
-        </form>
-        <p className="muted">Dữ liệu đang xem: <strong>{studentId}</strong>.
-          Mã mẫu: 22000001–22000004.</p>
-      </section>
+
+      {/* Bài 1: Form chọn sinh viên đã tách thành StudentForm.jsx */}
+      <StudentForm
+        draftId={draftId}
+        studentId={studentId}
+        busy={busy}
+        loading={loading}
+        onDraftChange={setDraftId}
+        onSubmit={chooseStudent}
+        onRefresh={() => setRefresh((value) => value + 1)}
+      />
+
       <Notice kind={notice.kind}>{notice.text}</Notice>
       <Notice kind="error">{error}</Notice>
       {loading && <Notice>Đang tải dữ liệu từ API...</Notice>}
@@ -135,10 +138,26 @@ export default function App() {
         <div className="workspace">
           <section className="panel">
             <h2>2. Danh sách lớp học phần</h2>
+            {/* Bài 2: Bổ sung bộ lọc học phần INT2204/INT2205/INT2206 lấy từ GET /courses */}
             <div className="filters">
               <label htmlFor="search">Tìm lớp / học phần</label>
               <input id="search" value={search} placeholder="Ví dụ: web"
                 onChange={(e) => setSearch(e.target.value)} />
+              
+              <label htmlFor="course-select">Mã học phần</label>
+              <select
+                id="course-select"
+                value={selectedCourse}
+                onChange={(e) => setSelectedCourse(e.target.value)}
+              >
+                <option value="">-- Tất cả học phần --</option>
+                {courses.map((course) => (
+                  <option key={course.code} value={course.code}>
+                    {course.code} - {course.name}
+                  </option>
+                ))}
+              </select>
+
               <label className="check">
                 <input type="checkbox" checked={onlyAvailable}
                   onChange={(e) => setOnlyAvailable(e.target.checked)} />
@@ -148,6 +167,7 @@ export default function App() {
             <SectionTable rows={rows} disabled={disabled}
               onEnroll={(id) => changeEnrollment(id)} />
           </section>
+
           <section className="panel">
             <h2>3. Lớp đã đăng ký</h2>
             <p className="muted">Sinh viên {studentId} · {enrollments.length} lớp</p>
@@ -156,6 +176,21 @@ export default function App() {
           </section>
         </div>
       )}
+
+      {/* Bài 3: Màn hình lịch sử của sinh viên có phân trang (nhật ký demo) */}
+      {!loading && !error && (
+        <EnrollmentHistory
+          studentId={studentId}
+          refresh={refresh}
+          disabled={busy}
+        />
+      )}
+
+      {/* Bài 4: Mở rộng tìm kiếm / phân trang phía server cho Project */}
+      {!loading && !error && (
+        <ServerSectionSearch courses={courses} />
+      )}
+
       <footer>Số chỗ và đăng ký được đọc từ API; Backend quyết định tính hợp lệ.</footer>
     </main>
   );

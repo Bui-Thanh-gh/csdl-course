@@ -23,7 +23,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["Content-Type"],
 )   
 
@@ -139,19 +139,49 @@ def get_course(course_code: str) -> dict[str, object]:
 @app.get("/sections")
 def list_sections(
     available_only: bool = False,
+    q: str | None = Query(default=None),
+    course_code: str | None = Query(default=None),
+    skip: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=100),
 ) -> list[dict[str, object]]:
     sql = """
         SELECT class_id, course_code, capacity, enrolled, remaining
         FROM v_section_summary
     """
+    conditions: list[str] = []
+    skip_val = skip if isinstance(skip, int) else 0
+    parameters: dict[str, object] = {
+        "skip": skip_val,
+    }
 
-    if available_only:
-        sql += " WHERE remaining > 0"
+    if available_only is True:
+        conditions.append("remaining > 0")
+
+    if isinstance(course_code, str):
+        code_val = course_code.strip().upper()
+        if code_val:
+            conditions.append("course_code = :course_code")
+            parameters["course_code"] = code_val
+
+    if isinstance(q, str):
+        keyword = q.strip().lower()
+        if keyword:
+            conditions.append("(LOWER(class_id) LIKE :keyword OR LOWER(course_code) LIKE :keyword)")
+            parameters["keyword"] = f"%{keyword}%"
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
 
     sql += " ORDER BY class_id"
 
+    if isinstance(limit, int):
+        parameters["limit"] = limit
+        sql += " LIMIT :limit OFFSET :skip"
+    elif skip_val > 0:
+        sql += " OFFSET :skip"
+
     with engine.connect() as connection:
-        rows = connection.execute(text(sql)).mappings().all()
+        rows = connection.execute(text(sql), parameters).mappings().all()
     
     return [dict(row) for row in rows]
 
@@ -455,6 +485,7 @@ def update_section_capacity(section_id: str, payload: SectionCapacityUpdate) -> 
 def list_enrollment_events(
     student_id: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
+    dataset: str | None = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[dict[str, object]]:
@@ -463,22 +494,30 @@ def list_enrollment_events(
         FROM enrollment_events
     """
     conditions: list[str] = []
+    skip_val = skip if isinstance(skip, int) else 0
+    limit_val = limit if isinstance(limit, int) else 50
     parameters: dict[str, object] = {
-        "skip": skip,
-        "limit": limit,
+        "skip": skip_val,
+        "limit": limit_val,
     }
 
-    if student_id is not None:
+    if isinstance(student_id, str):
         student_id_val = student_id.strip()
         if student_id_val:
             conditions.append("student_id = :student_id")
             parameters["student_id"] = student_id_val
 
-    if event_type is not None:
+    if isinstance(event_type, str):
         event_type_val = event_type.strip().upper()
         if event_type_val:
             conditions.append("event_type = :event_type")
             parameters["event_type"] = event_type_val
+
+    if isinstance(dataset, str):
+        dataset_val = dataset.strip()
+        if dataset_val:
+            conditions.append("dataset = :dataset")
+            parameters["dataset"] = dataset_val
 
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
