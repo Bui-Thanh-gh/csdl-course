@@ -22,7 +22,15 @@ jobs:
         run: python -m pip install -r backend/requirements-dev.txt
       - name: Compile backend
         run: python -m compileall backend
+      - name: Prepare non-secret env for contract test
+        run: cp backend/.env.docker.example backend/.env
       - name: Test backend contract
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: coursehub
+          DB_USER: test_user
+          DB_PASSWORD: test_password
         run: pytest backend/tests -q
 
   frontend:

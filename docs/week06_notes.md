@@ -23,12 +23,14 @@
 - Lỗi gặp phải:
   1. File workflow CI đặt nhầm tại `.github/ci.yml` thay vì `.github/workflows/ci.yml`.
   2. Kết nối PostgreSQL từ container Backend: `127.0.0.1` trong container chỉ chính container Backend, không kết nối được PostgreSQL đang chạy trên host.
+  3. GitHub Actions Backend job fail: `RuntimeError: Thieu bien moi truong: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD` khi chạy pytest do runner không có file `backend/.env`.
 - Bằng chứng đã xem:
   1. Kiểm tra cấu trúc thư mục `.github/workflows/` theo quy chuẩn GitHub Actions.
   2. Kiểm tra `docker compose logs backend` và file cấu hình `backend/.env.docker` với `DB_HOST=host.docker.internal` kèm `extra_hosts` trong `compose.yaml`.
+  3. Log chi tiết tại step `Test backend contract` trên GitHub Actions chỉ ra `backend/app/database.py` thiếu các biến môi trường khi import `main:app`.
 - Nếu dùng AI: gợi ý nào đã dùng và đã xác minh thế nào?:
-  - Dùng AI gợi ý cấu hình Nginx reverse proxy (`location /api/ { proxy_pass http://backend:8000/; }`) và cấu hình multi-stage Dockerfile cho Frontend React.
-  - Xác minh: Kiểm tra tab Network trong DevTools thấy trình duyệt gọi `http://127.0.0.1:8080/api/...` và Backend nhận request thông qua log `docker compose logs backend`, không gặp lỗi CORS.
+  - Dùng AI phân tích log lỗi CI và cấu hình: (1) Nginx reverse proxy; (2) Multi-stage Dockerfile cho Frontend; (3) Bổ sung bước chuẩn bị biến môi trường mẫu (`cp backend/.env.docker.example backend/.env`) cho job `backend` trong `ci.yml` để pytest contract chạy độc lập không phụ thuộc secret thật.
+  - Xác minh: Kiểm tra tab Network trong DevTools thấy các request đi qua Nginx 8080 tới Backend không lỗi CORS; và CI runner có đầy đủ biến môi trường để import app và chạy contract test thành công.
 
 ## Pull Request / CI
 - PR: Nhánh week06-docker-ci mở Pull Request vào main
