@@ -3,7 +3,7 @@ from backend.app.main import app
 REQUIRED_PATHS = {
     "/health",
     "/courses",
-    "/sections-wrong",
+    "/sections",
     "/students/{student_id}/enrollments",
     "/enrollments",
     "/enrollments/{student_id}/{class_section_id}",
