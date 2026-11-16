@@ -36,3 +36,35 @@
 - PR: Nhánh week06-docker-ci mở Pull Request vào main
 - Reviewer: Thành viên nhóm review diff (Dockerfile, compose.yaml, CI workflow, tests)
 - CI run: pass - Cả 3 job (backend, frontend, docker) đều xanh khi chạy trên GitHub Actions runner
+
+## Báo cáo kết quả bài tập tự thực hành (Bài 1 - 4)
+
+### Bài 1. Assertion OpenAPI Contract và kiểm thử CI đỏ/xanh
+- **Thực hiện**: Bổ sung assertion kiểm tra method `get` cho endpoint `/sections` trong `test_enrollment_methods_are_registered` (`backend/tests/test_openapi_contract.py`).
+- **Thử nghiệm lỗi (CI đỏ)**: Tạm thời sửa thành `assert "post" in paths["/sections"]`. Lệnh `pytest backend/tests -q` báo lỗi `AssertionError: assert 'post' in {'get': ...}` (FAILED 1, PASSED 1). Trên CI, step `Test backend contract` sẽ dừng pipeline ngay lập tức.
+- **Khôi phục (CI xanh)**: Khôi phục lại `assert "get" in paths["/sections"]`, kiểm thử local chạy thành công: `2 passed in 1.08s`.
+
+### Bài 2. Lỗi cấu hình có kiểm soát và khắc phục không xóa database
+- **Kịch bản**: Sai biến môi trường kết nối database `DB_HOST=127.0.0.1` trong `backend/.env.docker`.
+- **Triệu chứng & Bằng chứng**:
+  - `docker compose ps`: container `backend` ở trạng thái `unhealthy`.
+  - `docker compose logs backend`: ghi nhận `sqlalchemy.exc.OperationalError: (psycopg.OperationalError) connection failed: Connection refused`. Do `127.0.0.1` trong container trỏ về chính nó chứ không phải máy host.
+  - Container `frontend` (phụ thuộc `service_healthy`) bị hoãn khởi động, hoặc trả về `502 Bad Gateway` khi gọi qua Nginx.
+- **Cách khắc phục**: Giữ nguyên toàn bộ database PostgreSQL trên host (không xóa, không migrate lại dữ liệu). Sửa lại `DB_HOST=host.docker.internal` trong `backend/.env.docker` và đảm bảo `extra_hosts` có trong `compose.yaml`. Chạy `docker compose up -d`, container backend kết nối thành công và chuyển sang `healthy`.
+
+### Bài 3. Cấu hình Docker Compose tối thiểu và tài liệu dựng lại cho nhóm
+- **Thực hiện**:
+  - Tệp `compose.yaml` tối thiểu ghép nối 2 dịch vụ `backend` và `frontend` với cổng public tương ứng `8000` và `8080`, reverse proxy qua Nginx tại `/api`.
+  - Soạn thảo tài liệu `README.md` chi tiết tại thư mục gốc hướng dẫn thành viên khác checkout nhánh `week06-docker-ci`, sao chép cấu hình môi trường từ `backend/.env.docker.example` và chạy `docker compose up --build -d` để dựng lại toàn bộ ứng dụng chỉ với một lệnh duy nhất.
+
+### Bài 4. Mở rộng CI với step Lint kiểm tra chất lượng mã nguồn
+- **Thực hiện**:
+  - Thêm `flake8` vào `backend/requirements-dev.txt`.
+  - Thêm step `Lint backend code with Flake8` vào job `backend` trong `.github/workflows/ci.yml` sử dụng bộ lọc `--select=E9,F63,F7,F82`.
+- **Lỗi bắt được**:
+  - `E9` (SyntaxError, IndentationError, TokenError): Phát hiện ngay lỗi cú pháp, thụt dòng sai trước khi chạy code.
+  - `F821` (Undefined name / NameError): Bắt các lỗi biến/hàm chưa được khai báo ở các nhánh code chưa được unit test phủ tới (uncovered branch).
+  - `F63`: Bắt lỗi cú pháp toán tử assertion hoặc so sánh logic sai.
+  - `F7`: Bắt lỗi import sai cấu trúc gói.
+  - Giúp phát hiện lỗi tĩnh tức thì trong vài giây trước khi chạy test và build image Docker.
+
